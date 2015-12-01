@@ -1,7 +1,318 @@
 'use strict';
 
+var BUFFER_SIZE = 1024*4;
+
+var context = new webkitAudioContext();
+
+var buffer = context.createBuffer(2, BUFFER_SIZE, context.sampleRate);
+
+var node1 = context.createScriptProcessor(BUFFER_SIZE, 2, 2);
+var node2 = context.createScriptProcessor(BUFFER_SIZE, 2, 2);
+
+var alpha = 2; var position = 0; var position2 = 0;
+
+var phasevocoderL1 = new PhaseVocoder(BUFFER_SIZE/2, 44100); phasevocoderL1.init();
+var phasevocoderR1 = new PhaseVocoder(BUFFER_SIZE/2, 44100); phasevocoderR1.init();
+
+var phasevocoderL2 = new PhaseVocoder(BUFFER_SIZE/2, 44100); phasevocoderL2.init();
+var phasevocoderR2 = new PhaseVocoder(BUFFER_SIZE/2, 44100); phasevocoderR2.init();
+
+var phasevocoderL3 = new PhaseVocoder(BUFFER_SIZE/2, 44100); phasevocoderL3.init();
+var phasevocoderR3 = new PhaseVocoder(BUFFER_SIZE/2, 44100); phasevocoderR3.init();
+
+var outBufferL1 = [];
+var outBufferR1 = [];
+
+var outBufferL2 = [];
+var outBufferR2 = [];
+
+// Semitones from C to C D E F G A B
+var SEMITONES = [ 0, 2, 4, 5, 7, 9, 11 ]
+// Chromatic melodic scale
+var CHROMATIC = [ 'C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B' ]
+
+function fromMidi (midi) {
+  var name = CHROMATIC[midi % 12]
+  var oct = Math.floor(midi / 12) - 1
+  return name + oct
+}
+
+function fromFreq (freq, tuning) {
+  tuning = tuning || 440
+  var lineal = 12 * ((Math.log(freq) - Math.log(tuning)) / Math.log(2))
+  var midi = Math.round(69 + lineal)
+  return fromMidi(midi)
+}
+
+
+
+function createCORSRequest(method, url) {
+  var xhr = new XMLHttpRequest();
+  if ("withCredentials" in xhr) {
+
+    // Check if the XMLHttpRequest object has a "withCredentials" property.
+    // "withCredentials" only exists on XMLHTTPRequest2 objects.
+    xhr.open(method, url, true);
+
+  } else if (typeof XDomainRequest != "undefined") {
+
+    // Otherwise, check if XDomainRequest.
+    // XDomainRequest only exists in IE, and is IE's way of making CORS requests.
+    xhr = new XDomainRequest();
+    xhr.open(method, url);
+
+  } else {
+
+    // Otherwise, CORS is not supported by the browser.
+    xhr = null;
+
+  }
+  return xhr;
+}
+
+
+function loadSample (stream_url) {
+
+             //var track = results.tracks.items[0];
+            //var stream_url = track.stream_url + (/\?/.test(track.stream_url) ? '&' : '?') + 'consumer_key=' + apiKey;
+            var previewUrl = stream_url; //preview_url
+
+
+
+            var request = createCORSRequest('GET', previewUrl);
+            if (!request) {
+              alert("error");
+              throw new Error('CORS not supported');
+            }
+            //request.setRequestHeader('Accept-Encoding', '');
+
+            //var request = new XMLHttpRequest();
+            //request.open('GET', previewUrl, true);
+            request.responseType = 'arraybuffer';
+            request.onload = function() {
+        console.log('url loaded');
+        context.decodeAudioData(request.response, function(decodedData) {
+            buffer = decodedData;
+        });
+    }
+
+    console.log('reading url');
+    request.send();
+}
+
+//loadSample('https://api.soundcloud.com/tracks/219080995/stream?client_id=29690ca16f22593e7a6cf615d8fb8e33');
+
+//loadSample('https://api.soundcloud.com/tracks/100485761/stream?client_id=29690ca16f22593e7a6cf615d8fb8e33');
+
+loadSample('https://api.soundcloud.com/tracks/191460951/stream?client_id=29690ca16f22593e7a6cf615d8fb8e33');
+
+//loadSample('https://api.soundcloud.com/tracks/213330659/stream?client_id=29690ca16f22593e7a6cf615d8fb8e33');
+
+
+node1.onaudioprocess = function (e) {
+
+
+    var il = buffer.getChannelData(0);
+    var ir = buffer.getChannelData(1);
+
+    var ol = e.outputBuffer.getChannelData(0);
+    var or = e.outputBuffer.getChannelData(1);
+
+    // Fill output buffers (left & right) until the system has 
+    // enough processed samples to reproduce.
+    do {
+
+        var bufL = new Float32Array(BUFFER_SIZE);
+        var bufR = new Float32Array(BUFFER_SIZE);
+        bufL = il.subarray(position,position+BUFFER_SIZE);
+        bufR = ir.subarray(position,position+BUFFER_SIZE);
+
+        position += phasevocoderL1.get_analysis_hop();
+
+        // Process left input channel
+        outBufferL1 = outBufferL1.concat(phasevocoderL1.process(bufL));
+
+        // Process right input channel
+        outBufferR1 = outBufferR1.concat(phasevocoderR1.process(bufR));
+
+    } while(outBufferL1.length < BUFFER_SIZE);
+
+    ol.set(outBufferL1.splice(0,BUFFER_SIZE));
+    or.set(outBufferR1.splice(0,BUFFER_SIZE));
+    
+    /*var estimate = YINDetector(outBufferL1);
+    if (estimate.freq > 0) {
+        notename = fromFreq(estimate.freq)
+        console.log(estimate.freq);
+        $("#notename").text(notename);
+    }*/
+
+
+    /* Copy samples to the internal buffer */
+/*
+pitch.input(outBufferL1);
+
+pitch.process();
+
+var tone = pitch.findTone();
+
+if (tone === null) {
+    console.log('No tone found!');
+} else {
+            notename = fromFreq(tone.freq)
+        console.log(tone.freq);
+        $("#notename").text(notename);
+    //console.log('Found a tone, frequency:', tone.freq, 'volume:', tone.db);
+}
+*/
+
+
+
+
+};
+
+node2.onaudioprocess = function (e) {
+
+    var il = buffer.getChannelData(0);
+    var ir = buffer.getChannelData(1);
+
+    var ol = e.outputBuffer.getChannelData(0);
+    var or = e.outputBuffer.getChannelData(1);
+
+    // Fill output buffers (left & right) until the system has 
+    // enough processed samples to reproduce.
+    do {
+
+        var bufL = new Float32Array(BUFFER_SIZE);
+        var bufR = new Float32Array(BUFFER_SIZE);
+        bufL = il.subarray(position2, position2+BUFFER_SIZE);
+        bufR = ir.subarray(position2, position2+BUFFER_SIZE);
+
+        position2 += phasevocoderL2.get_analysis_hop();
+
+        // Process left input channel
+        outBufferL2 = outBufferL2.concat(phasevocoderL2.process(bufL));
+
+        // Process right input channel
+        outBufferR2 = outBufferR2.concat(phasevocoderR2.process(bufR));
+
+    } while(outBufferL2.length < BUFFER_SIZE);
+
+    ol.set(outBufferL2.splice(0,BUFFER_SIZE));
+    or.set(outBufferR2.splice(0,BUFFER_SIZE));
+
+
+
+};
+
+
+function setAlpha(newAlpha) {
+    alpha = newAlpha;
+    phasevocoderL1.set_alpha(newAlpha);
+    phasevocoderR1.set_alpha(newAlpha);
+}
+
+function setAlpha2(newAlpha) {
+    phasevocoderL2.set_alpha(newAlpha);
+    phasevocoderR2.set_alpha(newAlpha);
+}
+
+function setPosition(v) {
+    if(v===undefined) return;
+    resetPVs2();
+    //outBufferL = [];
+    //outBufferR = [];
+
+    position = Math.round(44100 * v);//Math.round(buffer.length * v);
+    console.log("pos: "+position + "v="+v);
+    position2 =  Math.round(44100 * v);//Math.round(buffer.length * v);
+}
+
+function resetPVs() {
+    phasevocoderL1.reset();
+    phasevocoderR1.reset();
+}
+
+function resetPVs2() {
+    phasevocoderL1.reset2();
+    phasevocoderR1.reset2();
+}
+
+function play() {
+    node1.connect(context.destination);
+    //node2.connect(context.destination);
+}
+
+function pause() {
+    node1.disconnect();
+    node2.disconnect();
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    var toggleActive = function (e, toggle) {
+        e.stopPropagation();
+        e.preventDefault();
+        // toggle ? e.target.classList.add('wavesurfer-dragover') :
+        //     e.target.classList.remove('wavesurfer-dragover');
+    };
+
+    var handlers = {
+        // Drop event
+        drop: function (e) {
+            toggleActive(e, false);
+
+            // Load the file into wavesurfer
+            if (e.dataTransfer.files.length) {
+                pause();
+                position = 0;
+                resetPVs();
+
+                var my = this;
+                // Create file reader
+                var reader = new FileReader();
+                reader.addEventListener('progress', function (e) {
+                    console.log(e);
+                });
+                reader.addEventListener('load', function (e) {
+                    document.getElementById('filename').innerHTML = "<b>" + filename + "</b> loaded";
+                    context.decodeAudioData(e.target.result, function(decodedData) {
+                        buffer = decodedData;
+                    });
+                });
+                reader.addEventListener('error', function () {
+                    console.error('Error reading file');
+                });
+
+                var filename = e.dataTransfer.files[0].name;
+                reader.readAsArrayBuffer(e.dataTransfer.files[0].slice());
+
+            } else {
+                console.error('Not a file');
+            }
+        },
+
+        // Drag-over event
+        dragover: function (e) {
+            toggleActive(e, true);
+        },
+
+        // Drag-leave event
+        dragleave: function (e) {
+            toggleActive(e, false);
+        }
+    };
+
+    var dropTarget = document.querySelector('#drop');
+    Object.keys(handlers).forEach(function (event) {
+        dropTarget.addEventListener(event, handlers[event]);
+    });
+});
+
+
+
+
 WaveSurfer.WebAudio = {
-    scriptBufferSize: 256,
+    scriptBufferSize: BUFFER_SIZE,
     PLAYING_STATE: 0,
     PAUSED_STATE: 1,
     FINISHED_STATE: 2,
@@ -109,7 +420,7 @@ WaveSurfer.WebAudio = {
     addOnAudioProcess: function () {
         var my = this;
 
-        this.scriptNode.onaudioprocess = function () {
+        this.scriptNode.onaudioprocess = function (e) {
             var time = my.getCurrentTime();
 
             if (time >= my.getDuration()) {
@@ -121,6 +432,66 @@ WaveSurfer.WebAudio = {
             } else if (my.state === my.states[my.PLAYING_STATE]) {
                 my.fireEvent('audioprocess', time);
             }
+
+
+
+
+
+
+
+
+    var il = my.source.buffer.getChannelData(0);
+    var ir = my.source.buffer.getChannelData(1);
+
+    var ol = e.outputBuffer.getChannelData(0);
+    var or = e.outputBuffer.getChannelData(1);
+
+    // Fill output buffers (left & right) until the system has 
+    // enough processed samples to reproduce.
+    do {
+
+        var bufL = new Float32Array(BUFFER_SIZE);
+        var bufR = new Float32Array(BUFFER_SIZE);
+        bufL = il.subarray(position,position+BUFFER_SIZE);
+        bufR = ir.subarray(position,position+BUFFER_SIZE);
+
+        position += phasevocoderL1.get_analysis_hop();
+
+        // Process left input channel
+        outBufferL1 = outBufferL1.concat(phasevocoderL1.process(bufL));
+
+        // Process right input channel
+        outBufferR1 = outBufferR1.concat(phasevocoderR1.process(bufR));
+
+    } while(outBufferL1.length < BUFFER_SIZE);
+    ol.set(outBufferL1.splice(0,BUFFER_SIZE));
+    or.set(outBufferR1.splice(0,BUFFER_SIZE));
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         };
     },
 
@@ -144,7 +515,7 @@ WaveSurfer.WebAudio = {
             this.gainNode = this.ac.createGainNode();
         }
         // Add the gain node to the graph
-        this.gainNode.connect(this.ac.destination);
+        //this.gainNode.connect(this.ac.destination);
     },
 
     /**
@@ -284,6 +655,7 @@ WaveSurfer.WebAudio = {
 
     seekTo: function (start, end) {
         this.scheduledPause = null;
+        setPosition(start); 
 
         if (start == null) {
             start = this.getCurrentTime();
@@ -306,7 +678,7 @@ WaveSurfer.WebAudio = {
     },
 
     getPlayedTime: function () {
-        return (this.ac.currentTime - this.lastPlay) * this.playbackRate;
+        return (this.ac.currentTime - this.lastPlay) * this.playbackRate / alpha;
     },
 
     /**
@@ -329,7 +701,8 @@ WaveSurfer.WebAudio = {
         this.scheduledPause = end;
 
         this.source.start(0, start, end - start);
-
+        //play();
+        setAlpha(2.0);
         this.setState(this.PLAYING_STATE);
 
         this.fireEvent('play');
